@@ -83,6 +83,12 @@ def health():
     return {"status": "ok", "model_loaded": predictor.model is not None}
 
 
+@app.post("/reload-model")
+def reload_model():
+    predictor.load()
+    return {"status": "ok", "model_loaded": predictor.model is not None}
+
+
 @app.post("/predict", response_model=PredictResponse)
 def predict(body: PredictRequest, request: Request):
     start = time.perf_counter()
