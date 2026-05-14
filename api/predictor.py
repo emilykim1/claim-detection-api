@@ -68,7 +68,7 @@ class ClaimPredictor:
             continue_final_message=True,
             add_generation_prompt=False,
             return_tensors="pt",
-        )
+        ).input_ids
         input_ids = input_ids[:, :-1].to(self.device)
         attention_mask = torch.ones_like(input_ids, device=self.device)
 

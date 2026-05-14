@@ -14,7 +14,7 @@ except ModuleNotFoundError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-predictor = ClaimPredictor(model_path="assets/models/llama-1b-claim-ft/")
+predictor = ClaimPredictor(model_path="assets/models/llama-1b-claim-ft-checkpoints/step-500/")
 
 
 @asynccontextmanager
