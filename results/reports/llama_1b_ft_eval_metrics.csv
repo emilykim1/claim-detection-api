@@ -1,0 +1,2 @@
+Run,Rows,Source,Accuracy,Precision,Recall,F1
+Llama 1B FT Eval,100,results/llama_1b_ft_eval.csv,0.770000,0.891892,0.634615,0.741573

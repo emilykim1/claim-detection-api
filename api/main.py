@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel, Field, field_validator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -11,15 +11,17 @@ from sklearn.metrics import accuracy_score, classification_report, f1_score
 
 try:
     from api.predictor import ClaimPredictor
+    from api.ui import PREDICT_UI_HTML
 except ModuleNotFoundError:
     from predictor import ClaimPredictor
+    from ui import PREDICT_UI_HTML
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 TEST_DATA_PATH = PROJECT_DIR / "data" / "ours" / "test.csv"
 
-predictor = ClaimPredictor(model_path="assets/models/llama-1b-claim-ft-checkpoints/step-500/")
+predictor = ClaimPredictor()
 
 
 @asynccontextmanager
@@ -33,9 +35,20 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Claim Detection API",
-    description="Detects whether a sentence contains a factual claim.",
+    summary="Sentence-level factual claim classification.",
+    description=(
+        "Classify text as a factual claim and inspect model readiness for "
+        "the local Llama claim detector."
+    ),
     version="1.0.0",
     lifespan=lifespan,
+    docs_url=None,
+    swagger_ui_parameters={
+        "defaultModelsExpandDepth": -1,
+        "displayRequestDuration": True,
+        "filter": True,
+        "syntaxHighlight": {"theme": "arta"},
+    },
 )
 
 app.add_middleware(
@@ -252,96 +265,235 @@ async def add_process_time(request: Request, call_next):
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
-@app.get("/", response_class=HTMLResponse)
-def home():
-    return f"""
-    <html>
-      <head>
-        <title>Claim Detection API</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        {APP_CSS}
-      </head>
-      <body>
-        <main class="page">
-          <section class="hero">
-            <div class="eyebrow">Claim Detection API</div>
-            <h1>Small browser UI for model checks and evaluation.</h1>
-            <p>
-              This app can score single sentences and generate a test-split report
-              from the currently loaded fine-tuned model.
-            </p>
-            <div class="row">
-              <a class="button" href="/report/test/ui">Open Test Report UI</a>
-              <a class="button secondary" href="/docs">Open Swagger Docs</a>
-            </div>
-          </section>
+DOCS_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claim Detection API Docs</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+  <style>
+    :root {
+      --ink: #17231f;
+      --muted: #51635b;
+      --paper: #f5f2eb;
+      --panel: #fffdf9;
+      --line: #d8d0c2;
+      --claim: #087f5b;
+      --signal: #1f5fbb;
+      --alert: #c2410c;
+    }
 
-          <section class="grid two">
-            <div class="card">
-              <h2>Single Prediction</h2>
-              <p class="footer-note">Runs against <code>/predict</code>.</p>
-              <div style="height:16px"></div>
-              <label>
-                Sentence
-                <textarea id="sentence">The Empire State Building was completed in 1931.</textarea>
-              </label>
-              <div style="height:12px"></div>
-              <button onclick="runPrediction()">Predict</button>
-              <div style="height:16px"></div>
-              <pre id="predict-result">Click Predict to run inference.</pre>
-            </div>
+    * {
+      box-sizing: border-box;
+      letter-spacing: 0;
+    }
 
-            <div class="card">
-              <h2>Quick Links</h2>
-              <div class="grid">
-                <a class="button secondary" href="/health">Health JSON</a>
-                <a class="button secondary" href="/report/test">Test Report JSON</a>
-                <a class="button secondary" href="/openapi.json">OpenAPI JSON</a>
-              </div>
-              <div style="height:18px"></div>
-              <p>
-                The root page is now a thin UI layer over the existing JSON API,
-                so scripts and notebooks can keep using the original endpoints.
-              </p>
-            </div>
-          </section>
-        </main>
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(180deg, #fff9ef 0, var(--paper) 300px),
+        var(--paper);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+    }
 
-        <script>
-          async function runPrediction() {{
-            const sentence = document.getElementById("sentence").value;
-            const result = document.getElementById("predict-result");
-            result.textContent = "Running...";
-            try {{
-              const response = await fetch("/predict", {{
-                method: "POST",
-                headers: {{ "Content-Type": "application/json" }},
-                body: JSON.stringify({{ sentence }})
-              }});
-              const data = await response.json();
-              result.textContent = JSON.stringify(data, null, 2);
-            }} catch (err) {{
-              result.textContent = String(err);
-            }}
-          }}
-        </script>
-      </body>
-    </html>
-    """
+    .docs-header {
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 253, 249, 0.94);
+    }
 
-@app.get("/health")
+    .docs-header__inner {
+      width: min(1180px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 30px 0 24px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+    }
+
+    .docs-header h1 {
+      margin: 0 0 8px;
+      font-size: clamp(1.8rem, 3vw, 2.7rem);
+      line-height: 1.05;
+    }
+
+    .docs-header p {
+      max-width: 620px;
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .docs-status {
+      min-width: 170px;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--claim);
+      border-radius: 8px;
+      color: var(--muted);
+      background: var(--panel);
+      box-shadow: 0 12px 36px rgba(23, 35, 31, 0.08);
+    }
+
+    .docs-status strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--ink);
+    }
+
+    #swagger-ui {
+      width: min(1180px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 24px 0 48px;
+    }
+
+    .swagger-ui,
+    .swagger-ui .info .title,
+    .swagger-ui .opblock-tag {
+      font-family: inherit;
+      color: var(--ink);
+    }
+
+    .swagger-ui .topbar,
+    .swagger-ui .info .title small,
+    .swagger-ui .models {
+      display: none;
+    }
+
+    .swagger-ui .info {
+      margin: 0 0 22px;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+
+    .swagger-ui .info .title {
+      margin-bottom: 10px;
+      font-size: 1.45rem;
+    }
+
+    .swagger-ui .scheme-container,
+    .swagger-ui .opblock,
+    .swagger-ui .dialog-ux .modal-ux {
+      border-radius: 8px;
+      box-shadow: none;
+    }
+
+    .swagger-ui .scheme-container {
+      margin: 0 0 18px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    .swagger-ui .opblock {
+      overflow: hidden;
+      border-width: 1px;
+      background: var(--panel);
+    }
+
+    .swagger-ui .opblock.opblock-get {
+      border-color: rgba(31, 95, 187, 0.34);
+      background: rgba(31, 95, 187, 0.08);
+    }
+
+    .swagger-ui .opblock.opblock-post {
+      border-color: rgba(8, 127, 91, 0.36);
+      background: rgba(8, 127, 91, 0.08);
+    }
+
+    .swagger-ui .opblock.opblock-post .opblock-summary-method {
+      background: var(--claim);
+    }
+
+    .swagger-ui .opblock.opblock-get .opblock-summary-method {
+      background: var(--signal);
+    }
+
+    .swagger-ui button,
+    .swagger-ui select,
+    .swagger-ui input,
+    .swagger-ui textarea {
+      font-family: inherit;
+    }
+
+    .swagger-ui .btn.execute {
+      border-color: var(--alert);
+      background: var(--alert);
+    }
+
+    @media (max-width: 720px) {
+      .docs-header__inner {
+        width: min(100% - 24px, 1180px);
+        align-items: stretch;
+        flex-direction: column;
+        padding-top: 22px;
+      }
+
+      #swagger-ui {
+        width: min(100% - 24px, 1180px);
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="docs-header">
+    <div class="docs-header__inner">
+      <div>
+        <h1>Claim Detection API</h1>
+        <p>Inspect model readiness and classify sentences by factual claim likelihood.</p>
+      </div>
+      <div class="docs-status">
+        <strong>Local model API</strong>
+        Llama claim detector
+      </div>
+    </div>
+  </header>
+  <div id="swagger-ui"></div>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    SwaggerUIBundle({
+      url: "/openapi.json",
+      dom_id: "#swagger-ui",
+      deepLinking: true,
+      displayRequestDuration: true,
+      filter: true,
+      defaultModelsExpandDepth: -1,
+      presets: [SwaggerUIBundle.presets.apis],
+    });
+  </script>
+</body>
+</html>
+"""
+
+
+@app.get("/docs", include_in_schema=False)
+def docs():
+    return HTMLResponse(DOCS_HTML)
+
+
+@app.get("/", include_in_schema=False)
+def prediction_ui():
+    return HTMLResponse(PREDICT_UI_HTML)
+
+
+@app.get("/health", tags=["Operations"], summary="Check model readiness")
 def health():
     return {"status": "ok", "model_loaded": predictor.model is not None}
 
 
-@app.post("/reload-model")
+@app.post("/reload-model", tags=["Operations"], summary="Reload the local model")
 def reload_model():
     predictor.load()
     return {"status": "ok", "model_loaded": predictor.model is not None}
 
 
-@app.post("/predict", response_model=PredictResponse)
-def predict(body: PredictRequest, request: Request):
+def run_prediction(body: PredictRequest) -> PredictResponse:
     start = time.perf_counter()
     try:
         result = predictor.predict(body.sentence)
@@ -358,7 +510,38 @@ def predict(body: PredictRequest, request: Request):
     )
 
 
-@app.post("/predict/batch")
+def format_prediction(result: PredictResponse) -> str:
+    verdict = "a factual claim" if result.is_claim else "not a factual claim"
+    return (
+        f"Sentence: {result.sentence}\n"
+        f"Verdict: This is {verdict}.\n"
+        f"Claim probability: {result.claim_probability:.1%}\n"
+        f"Confidence: {result.confidence:.1%}\n"
+        f"Latency: {result.latency_ms} ms"
+    )
+
+
+@app.post(
+    "/predict",
+    response_class=PlainTextResponse,
+    tags=["Predictions"],
+    summary="Classify one sentence as text",
+)
+def predict_text(body: PredictRequest):
+    return format_prediction(run_prediction(body))
+
+
+@app.post(
+    "/predict/json",
+    response_model=PredictResponse,
+    tags=["Predictions"],
+    summary="Classify one sentence as JSON",
+)
+def predict_json(body: PredictRequest):
+    return run_prediction(body)
+
+
+@app.post("/predict/batch", tags=["Predictions"], summary="Classify up to 32 sentences")
 def predict_batch(sentences: list[str]):
     """Predict on multiple sentences at once (max 32)."""
     if len(sentences) > 32:
@@ -568,3 +751,7 @@ def report_test_ui():
       </body>
     </html>
     """
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="127.0.0.1", port=8000)

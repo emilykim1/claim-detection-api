@@ -1,5 +1,5 @@
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, PreTrainedTokenizerFast
 from pathlib import Path
 import logging
 
@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 
 class ClaimPredictor:
-    def __init__(self, model_path: str = "assets/models/llama-1b-claim-ft/"):
+    def __init__(self, model_path: str = "assets/models/llama-1b-claim-ft/step-500/"):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model_path = model_path
         self.tokenizer = None
@@ -23,13 +23,7 @@ class ClaimPredictor:
 
         model_name = str(path)
 
-        tokenizer_kwargs = {"use_fast": True}
-        try:
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                model_name, fix_mistral_regex=True, **tokenizer_kwargs
-            )
-        except TypeError:
-            self.tokenizer = AutoTokenizer.from_pretrained(model_name, **tokenizer_kwargs)
+        self.tokenizer = PreTrainedTokenizerFast.from_pretrained(model_name)
 
         self.model = AutoModelForCausalLM.from_pretrained(model_name)
 
@@ -62,13 +56,14 @@ class ClaimPredictor:
             {"role": "assistant", "content": ""},
         ]
 
-        input_ids = self.tokenizer.apply_chat_template(
+        chat_inputs = self.tokenizer.apply_chat_template(
             messages,
             tokenize=True,
             continue_final_message=True,
             add_generation_prompt=False,
             return_tensors="pt",
-        ).input_ids
+        )
+        input_ids = chat_inputs.input_ids if hasattr(chat_inputs, "input_ids") else chat_inputs
         input_ids = input_ids[:, :-1].to(self.device)
         attention_mask = torch.ones_like(input_ids, device=self.device)
 
